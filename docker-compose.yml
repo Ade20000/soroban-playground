@@ -77,6 +77,8 @@ services:
       - /app/node_modules
     environment:
       - NODE_ENV=${NODE_ENV:-development}
+      # Trusted browser origin (required once NODE_ENV=production).
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
       interval: 30s

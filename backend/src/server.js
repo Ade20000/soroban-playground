@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 import express from 'express';
-import cors from 'cors';
 import morgan from 'morgan';
 import fs from 'fs';
 import path from 'path';
@@ -11,7 +10,12 @@ import { fileURLToPath } from 'url';
 
 import config from './config/index.js';
 import { validateEnv } from './config/env.js';
-import { corsOptions } from './config/cors.js';
+import { createCorsPolicy } from './config/cors.js';
+import {
+  getCachedOrigins,
+  startOriginCacheRefresh,
+  stopOriginCacheRefresh,
+} from './services/corsWhitelistService.js';
 import {
   applyServerTuning,
   createAlpnServer,
@@ -176,7 +180,12 @@ applyDdosProtection(app);
 applySecurityHeaders(app);
 app.use(rateLimitMiddleware('global'));
 app.use(morgan('combined'));
-app.use(cors(corsOptions));
+// CORS: env allowlist + FRONTEND_URL + the live DB whitelist. Untrusted
+// Origins are rejected before they reach any route.
+const corsPolicy = createCorsPolicy(process.env, getCachedOrigins);
+for (const warning of corsPolicy.warnings) console.warn(`[CORS] ${warning}`);
+app.use(corsPolicy.enforceOriginIsolation);
+app.use(corsPolicy.corsMiddleware);
 app.use(express.json({ limit: '5mb' }));
 app.use(cookieParser());
 app.use(compressionMiddleware);
@@ -333,6 +342,7 @@ initializeDatabase()
       console.error('[CompileService] Initialization error:', err)
     );
 
+    await startOriginCacheRefresh();
     oracleWorkerPool.start();
     startCleanupWorker();
     startBackupScheduler();
@@ -391,6 +401,7 @@ async function gracefulShutdown(signal) {
     // 1. Stop background workers and queue consumers
     console.log('[Shutdown] Stopping background workers...');
     stopCleanupWorker();
+    stopOriginCacheRefresh();
     stopWebhookDispatcher();
     stopCertificateWatch();
     cacheInvalidator.stop().catch(() => {});
