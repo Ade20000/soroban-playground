@@ -94,8 +94,9 @@ services:
 
   indexer:
     build:
-      context: ./indexer
-      dockerfile: Dockerfile
+      # Workspace member: build from the repo root so the root Cargo.lock is used.
+      context: .
+      dockerfile: indexer/Dockerfile
     ports:
       - "3001:3001"
     volumes:
