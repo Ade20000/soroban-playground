@@ -328,7 +328,7 @@ Base URL: `http://localhost:5000/api/quadratic-voting`
 | GET    | `/status?contractId=`           | Get pause status    |
 | GET    | `/credits-to-votes?credits=`    | Calculate votes     |
 
-Full OpenAPI docs available at `http://localhost:5000/api-docs` when the backend is running.
+Interactive OpenAPI docs are served at `http://localhost:5000/docs` (raw spec: `/docs/openapi.json`; `/api-docs` still works). The spec is generated live from the Zod schemas passed to `validateRequest`, so it always matches what the server validates.
 
 **Example: Cast a vote**
 

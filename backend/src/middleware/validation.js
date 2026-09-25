@@ -29,14 +29,21 @@ export function formatZodError(error) {
   }));
 }
 
-export function validateRequest(schemas = {}) {
+/**
+ * Validate req.body / req.query / req.params against Zod schemas.
+ *
+ * The returned middleware carries its schemas (plus optional OpenAPI `docs`:
+ * summary, description, tags, security, responses) on `.openapi`, which
+ * docs/zodOpenApi.js reads to publish the live API specification.
+ */
+export function validateRequest(schemas = {}, docs = {}) {
   const {
     body: bodySchema,
     query: querySchema,
     params: paramsSchema,
   } = schemas;
 
-  return (req, res, next) => {
+  const middleware = (req, res, next) => {
     const errors = [];
 
     if (bodySchema) {
@@ -92,6 +99,14 @@ export function validateRequest(schemas = {}) {
 
     return next();
   };
+
+  middleware.openapi = {
+    body: bodySchema,
+    query: querySchema,
+    params: paramsSchema,
+    docs,
+  };
+  return middleware;
 }
 
 export function validateInput(req, res, next) {
