@@ -24,6 +24,58 @@ const HEALTH_CHECK_INTERVAL_MS = Number.parseInt(
   10
 );
 
+// Latency tracking: EMA (exponential moving average) smoothing factor.
+// A value closer to 1 reacts quickly; closer to 0 smooths out spikes.
+const LATENCY_EMA_ALPHA = 0.25;
+
+// ─── Endpoint selection heuristics ───────────────────────────────────────────
+
+/**
+ * Select the next endpoint using latency-weighted round-robin (#1575).
+ *
+ * Strategy:
+ *   1. Skip OPEN (circuit-broken) endpoints.
+ *   2. Among healthy endpoints prefer the one with the lowest p50 (EMA) latency.
+ *   3. Fall back to pure round-robin if no latency data is available.
+ */
+function selectBestEndpoint(endpoints, preferredIndex) {
+  const healthy = endpoints.filter((ep) => ep.state !== CIRCUIT_STATES.OPEN);
+  if (healthy.length === 0) return null;
+
+  // If none have latency data yet, fall back to the simple round-robin candidate
+  const withData = healthy.filter((ep) => ep.latencyEmaMs !== null);
+  if (withData.length === 0) {
+    // Return the next healthy endpoint in round-robin order
+    for (let i = 0; i < endpoints.length; i++) {
+      const idx = (preferredIndex + i) % endpoints.length;
+      if (endpoints[idx].state !== CIRCUIT_STATES.OPEN) return endpoints[idx];
+    }
+    return healthy[0];
+  }
+
+  // Pick the endpoint with the lowest EMA latency
+  return withData.reduce((best, ep) =>
+    ep.latencyEmaMs < best.latencyEmaMs ? ep : best
+  );
+}
+
+/**
+ * Update the exponential moving average (EMA) for a given endpoint's latency.
+ */
+function updateLatencyEma(ep, observedMs) {
+  if (ep.latencyEmaMs === null) {
+    ep.latencyEmaMs = observedMs;
+  } else {
+    ep.latencyEmaMs =
+      LATENCY_EMA_ALPHA * observedMs +
+      (1 - LATENCY_EMA_ALPHA) * ep.latencyEmaMs;
+  }
+  ep.latencySamples += 1;
+  ep.lastLatencyMs = observedMs;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 class SorobanRpcManager {
   constructor() {
     const rawFallbacks = process.env.SOROBAN_RPC_FALLBACK_URLS
@@ -36,6 +88,12 @@ class SorobanRpcManager {
       failCount: 0,
       lastFailureTime: null,
       isHealthy: true,
+      // Latency tracking (#1575)
+      latencyEmaMs: null,     // EMA of successful call latencies (ms)
+      latencySamples: 0,      // total successful samples recorded
+      lastLatencyMs: null,    // most recent observed latency
+      lastHealthyAt: null,
+      latestLedger: null,
     }));
 
     this.failureThreshold = Number.parseInt(
@@ -48,6 +106,10 @@ class SorobanRpcManager {
     );
     this.activeEndpointIndex = 0;
     this.healthTimer = null;
+    // Running totals for aggregate metrics
+    this._totalRequests = 0;
+    this._totalFailures = 0;
+
     if (process.env.NODE_ENV !== 'test') this.startHealthChecks();
   }
 
@@ -79,6 +141,7 @@ class SorobanRpcManager {
   async checkEndpointHealth(ep) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), RPC_TIMEOUT_MS);
+    const start = Date.now();
     try {
       const request = (method) =>
         fetch(ep.url, {
@@ -106,6 +169,11 @@ class SorobanRpcManager {
       if (health?.status && health.status !== 'healthy') {
         throw new Error(`RPC health status: ${health.status}`);
       }
+
+      // Update latency from the health-check round-trip
+      const elapsed = Date.now() - start;
+      updateLatencyEma(ep, elapsed);
+
       ep.isHealthy = true;
       ep.failCount = 0;
       ep.state = CIRCUIT_STATES.CLOSED;
@@ -141,6 +209,7 @@ class SorobanRpcManager {
 
   async executeRpcCall(callFn) {
     this.checkCircuitStates();
+    this._totalRequests += 1;
 
     const activeTraceId = getTraceId();
     const span = activeTraceId
@@ -158,16 +227,22 @@ class SorobanRpcManager {
       : {};
 
     let lastError = null;
-    const startIndex = this.activeEndpointIndex;
+
+    // Use latency-weighted endpoint selection (#1575)
+    const best = selectBestEndpoint(this.endpoints, this.activeEndpointIndex);
+    const preferredIndex = best
+      ? this.endpoints.indexOf(best)
+      : this.activeEndpointIndex;
 
     for (let i = 0; i < this.endpoints.length; i++) {
-      const idx = (startIndex + i) % this.endpoints.length;
+      const idx = (preferredIndex + i) % this.endpoints.length;
       const ep = this.endpoints[idx];
 
       if (ep.state === CIRCUIT_STATES.OPEN) {
         continue;
       }
 
+      const callStart = Date.now();
       try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), RPC_TIMEOUT_MS);
@@ -178,12 +253,17 @@ class SorobanRpcManager {
             signal: controller.signal,
           });
 
+          // Record latency on success
+          const elapsed = Date.now() - callStart;
+          updateLatencyEma(ep, elapsed);
+
           ep.failCount = 0;
           ep.state = CIRCUIT_STATES.CLOSED;
           ep.isHealthy = true;
           this.activeEndpointIndex = idx;
 
           span?.setStatus({ code: 1 });
+          span?.end();
           return result;
         } finally {
           clearTimeout(timeout);
@@ -192,6 +272,7 @@ class SorobanRpcManager {
         lastError = err;
         ep.failCount += 1;
         ep.lastFailureTime = Date.now();
+        this._totalFailures += 1;
 
         if (
           ep.failCount >= this.failureThreshold ||
@@ -213,9 +294,20 @@ class SorobanRpcManager {
 
   getStatus() {
     this.checkCircuitStates();
+    const totalReq = this._totalRequests;
+    const totalFail = this._totalFailures;
     return {
       activeEndpoint: this.activeEndpoint.url,
       circuitBreakerState: this.activeEndpoint.state,
+      // Aggregate metrics (#1575)
+      metrics: {
+        totalRequests: totalReq,
+        totalFailures: totalFail,
+        successRate:
+          totalReq > 0
+            ? Number(((totalReq - totalFail) / totalReq).toFixed(4))
+            : 1,
+      },
       endpoints: this.endpoints.map((ep) => ({
         url: ep.url,
         state: ep.state,
@@ -228,6 +320,10 @@ class SorobanRpcManager {
           ? new Date(ep.lastHealthyAt).toISOString()
           : null,
         latestLedger: ep.latestLedger ?? null,
+        // Latency tracking (#1575)
+        latencyEmaMs: ep.latencyEmaMs !== null ? Math.round(ep.latencyEmaMs) : null,
+        latencySamples: ep.latencySamples,
+        lastLatencyMs: ep.lastLatencyMs,
       })),
     };
   }
@@ -240,8 +336,13 @@ class SorobanRpcManager {
       ep.isHealthy = true;
       ep.lastHealthyAt = null;
       ep.latestLedger = null;
+      ep.latencyEmaMs = null;
+      ep.latencySamples = 0;
+      ep.lastLatencyMs = null;
     }
     this.activeEndpointIndex = 0;
+    this._totalRequests = 0;
+    this._totalFailures = 0;
   }
 }
 

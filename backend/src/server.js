@@ -85,6 +85,9 @@ import batchSubmitterRoute from './routes/batchSubmitter.js';
 import { setupSwagger } from './docs/swagger.js';
 import { negotiateApiVersion } from './middleware/apiVersioning.js';
 import { deprecationHeaders } from './middleware/deprecationHeaders.js';
+import queuesRoute from './routes/queues.js';
+import rpcRoute from './routes/rpc.js';
+import { validateStartupEnv } from './config/envSchema.js';
 
 const _filename = fileURLToPath(import.meta.url);
 const _dirname = path.dirname(_filename);
@@ -105,6 +108,8 @@ if (process.env.NODE_ENV !== 'test') {
     }
     process.exit(1);
   }
+  // Run Zod-based strict schema validation on startup (#1578)
+  validateStartupEnv({ strict: false, logger: console });
 }
 
 const app = express();
@@ -246,6 +251,10 @@ app.use('/api/deploy-queue', deployQueueRoute);
 app.use('/api/backup', backupRoute);
 app.use('/api/auth', authRoute);
 app.use('/api/background-jobs', backgroundJobsRoute);
+// Queue management & DLQ inspection (#1577)
+app.use('/api/queues', queuesRoute);
+// RPC router status & circuit-breaker reset (#1575)
+app.use('/api/rpc', rpcRoute);
 
 if (
   config.app?.env === 'development' ||
