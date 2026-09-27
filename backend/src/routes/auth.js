@@ -1,5 +1,12 @@
 import express from 'express';
 import authService from '../services/authService.js';
+import {
+  generateNonce,
+  verifyJwtMiddleware,
+  signAccessToken,
+  revokeAccessToken,
+} from '../middleware/challengeAuth.js';
+
 const router = express.Router();
 
 export const requireAuth = async (req, res, next) => {
@@ -78,6 +85,31 @@ router.get('/challenge', async (req, res) => {
   try {
     const challenge = await authService.generateStellarChallenge(address);
     return res.json(challenge);
+  } catch (error) {
+    return res.status(400).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/auth/nonce?address=G...
+ * Issues a replay-resistant nonce bound to the given Stellar address (#1576).
+ * The nonce must be included as X-Request-Nonce on subsequent challenge-verify requests.
+ */
+router.get('/nonce', async (req, res) => {
+  const { address } = req.query;
+  if (!address) {
+    return res.status(400).json({ error: 'address query parameter required' });
+  }
+  try {
+    const nonce = await generateNonce(address);
+    return res.json({
+      nonce,
+      expiresInSeconds: Number.parseInt(
+        process.env.SEP10_CHALLENGE_TTL_MS || '300000',
+        10
+      ) / 1000,
+      address,
+    });
   } catch (error) {
     return res.status(400).json({ error: error.message });
   }
