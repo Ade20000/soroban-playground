@@ -35,20 +35,21 @@ export function formatZodError(error) {
   }));
 }
 
-/**
  * Validate and sanitise req.body / req.query / req.params with Zod schemas.
  * On success the parsed value replaces the original, so unknown keys
  * (stripped by z.object) never reach the handler.
  *
+ * The returned middleware carries its schemas (plus optional OpenAPI `docs`:
+ * summary, description, tags, security, responses) on `.openapi`, which
+ * docs/zodOpenApi.js reads to publish the live API specification.
+ *
  * @param {{body?: z.ZodTypeAny, query?: z.ZodTypeAny, params?: z.ZodTypeAny}} schemas
- * @param {Object} [options]
- * @param {'envelope'|'httpError'} [options.format='envelope'] - 'envelope'
- *   responds 422 with field-level details; 'httpError' forwards a
- *   createHttpError(statusCode, 'Validation failed', messages[]) to the error
- *   handler, matching the legacy hand-written validators.
- * @param {number} [options.statusCode=400] - Status used with format 'httpError'.
+ * @param {Object} [optionsOrDocs]
  */
-export function validateRequest(schemas = {}, options = {}) {
+export function validateRequest(schemas = {}, optionsOrDocs = {}) {
+  const options = optionsOrDocs.format ? optionsOrDocs : {};
+  const docs = optionsOrDocs.docs || (optionsOrDocs.format ? {} : optionsOrDocs);
+
   const {
     body: bodySchema,
     query: querySchema,
@@ -56,7 +57,7 @@ export function validateRequest(schemas = {}, options = {}) {
   } = schemas;
   const { format = 'envelope', statusCode = 400 } = options;
 
-  return (req, res, next) => {
+  const middleware = (req, res, next) => {
     const errors = [];
 
     if (bodySchema) {
@@ -121,6 +122,14 @@ export function validateRequest(schemas = {}, options = {}) {
 
     return next();
   };
+
+  middleware.openapi = {
+    body: bodySchema,
+    query: querySchema,
+    params: paramsSchema,
+    docs,
+  };
+  return middleware;
 }
 
 export function validateInput(req, res, next) {

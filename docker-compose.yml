@@ -95,6 +95,8 @@ services:
       # Rate limiter: only honour X-Forwarded-For from hops on these ranges
       # (the compose bridge networks are private/uniquelocal).
       - TRUSTED_PROXIES=${TRUSTED_PROXIES:-loopback,linklocal,uniquelocal}
+      # Trusted browser origin (required once NODE_ENV=production).
+      - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
     depends_on:
       redis:
         condition: service_healthy
@@ -116,8 +118,9 @@ services:
 
   indexer:
     build:
-      context: ./indexer
-      dockerfile: Dockerfile
+      # Workspace member: build from the repo root so the root Cargo.lock is used.
+      context: .
+      dockerfile: indexer/Dockerfile
     ports:
       - "3001:3001"
     volumes:

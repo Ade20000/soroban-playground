@@ -17,7 +17,9 @@ const PRODUCTION_ENV_SCHEMA = z.object({
     .trim()
     .min(1)
     .default('https://soroban-testnet.stellar.org'),
-  CORS_ALLOWED_ORIGINS: z.string().trim().min(1).default('*'),
+  // No default: an unset allowlist is handled by config/cors.js, which
+  // rejects cross-origin browser requests in production.
+  CORS_ALLOWED_ORIGINS: z.string().trim().optional(),
 });
 
 function validateProductionEnv(env = process.env) {
@@ -42,9 +44,6 @@ function validateProductionEnv(env = process.env) {
     console.warn(
       '[config] No SOROBAN_RPC_URL provided, defaulting to Stellar Testnet'
     );
-  }
-  if (!env.CORS_ALLOWED_ORIGINS) {
-    env.CORS_ALLOWED_ORIGINS = '*';
   }
   if (!env.DATABASE_URL) {
     env.DATABASE_URL = 'sqlite://data/soroban.db';

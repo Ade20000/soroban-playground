@@ -4,24 +4,25 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-sqlx = { version = "0.7", features = ["runtime-tokio", "tls-rustls", "postgres", "sqlite", "macros"] }
-async-trait = "0.1"
-tokio = { version = "1", features = ["full"] }
-dotenv = "0.15"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-sha2 = "0.10"
-hex = "0.4"
+sqlx = { workspace = true, features = ["postgres", "sqlite"] }
+async-trait.workspace = true
+tokio.workspace = true
+dotenv.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+hex.workspace = true
 aes-gcm = "0.10"
 aead = "0.5"
 aws-config = "0.55"
 aws-sdk-s3 = "0.28"
-chrono = "0.4"
+chrono.workspace = true
 tokio-util = { version = "0.7", features = ["io"] }
 
 [workspace]
 resolver = "2"
 members = [
+    "indexer",
     "contracts/access-control",
     "contracts/ad-network",
     "contracts/admin-setter",
@@ -144,6 +145,20 @@ members = [
     "crates/common-ttl",
 ]
 
+# Dependencies shared by the root crate and the `indexer` service. Declaring
+# them once keeps the cryptographic (sha2/hex) and runtime (tokio/sqlx) stacks
+# on identical versions across both crates.
+[workspace.dependencies]
+async-trait = "0.1"
+chrono = "0.4"
+dotenv = "0.15"
+hex = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+sqlx = { version = "0.7", features = ["runtime-tokio", "tls-rustls", "macros"] }
+tokio = { version = "1", features = ["full"] }
+
 [profile.release]
 opt-level = "z"
 lto = true
@@ -153,3 +168,12 @@ strip = "symbols"
 overflow-checks = true
 debug = 0
 debug-assertions = false
+# `release` above is tuned for Soroban WASM (size-optimised, panic = abort).
+# Long-running native services such as the indexer build with this profile
+# instead so a panic inside one tokio task unwinds rather than aborting the
+# whole process.
+[profile.release-server]
+inherits = "release"
+opt-level = 3
+panic = "unwind"
+strip = "debuginfo"
