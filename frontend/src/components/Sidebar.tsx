@@ -4,6 +4,7 @@ import React, { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useFreighterWallet } from "@/hooks/useFreighterWallet";
+import ThemeSwitcher from "@/components/ThemeSwitcher";
 import {
   Code2,
   BookOpen,
@@ -157,7 +158,7 @@ export default function SidebarShell({
 
   return (
     <div
-      className="flex min-h-screen bg-[#060c18] text-[#e6edf7] font-sans antialiased selection:bg-teal-500/30 selection:text-teal-200"
+      className="flex min-h-screen bg-background text-foreground font-sans antialiased selection:bg-teal-500/30 selection:text-teal-200"
       suppressHydrationWarning
     >
       {/* Background Gradients */}
@@ -490,6 +491,9 @@ export default function SidebarShell({
           </div>
 
           <div className="flex items-center gap-3" suppressHydrationWarning>
+            {/* Light / dark / system theme control */}
+            <ThemeSwitcher />
+
             {/* Network indicator */}
             {wallet.status === "connected" && wallet.network && (
               <span className="hidden xs:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-teal-500/10 border border-teal-500/20 text-teal-400 text-[10px] font-semibold tracking-wider uppercase">

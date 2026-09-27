@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { GraphQLProvider } from "../components/providers/GraphQLProvider";
 import { WalletProvider } from "../components/providers/WalletProvider";
+import { ThemeProvider } from "../components/providers/ThemeProvider";
+import { THEME_BOOTSTRAP_SCRIPT } from "../lib/theme/engine";
 import SidebarShell from "../components/Sidebar";
 import RenderWarningModal from "../components/RenderWarningModal";
 
@@ -17,16 +19,28 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark" suppressHydrationWarning>
-      <body className="min-h-screen bg-[#060c18] text-[#e6edf7] antialiased" suppressHydrationWarning>
-        <WalletProvider>
-          <GraphQLProvider>
-            <SidebarShell>
-              <RenderWarningModal />
-              {children}
-            </SidebarShell>
-          </GraphQLProvider>
-        </WalletProvider>
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        {/*
+          Resolve the stored / OS theme before first paint so a returning visitor
+          never sees a flash of the default palette.
+        */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }} />
+      </head>
+      <body
+        className="min-h-screen bg-background text-foreground antialiased"
+        suppressHydrationWarning
+      >
+        <ThemeProvider>
+          <WalletProvider>
+            <GraphQLProvider>
+              <SidebarShell>
+                <RenderWarningModal />
+                {children}
+              </SidebarShell>
+            </GraphQLProvider>
+          </WalletProvider>
+        </ThemeProvider>
       </body>
     </html>
   );
